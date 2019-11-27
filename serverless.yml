@@ -487,7 +487,6 @@ resources:
               Principal:
                 AWS:
                   - arn:aws:iam::${self:custom.aws_account_id}:user/ahammond
-                  - arn:aws:iam::${self:custom.aws_account_id}:user/craig
               Action:
                 - "kms:*"
               Resource: "*"
