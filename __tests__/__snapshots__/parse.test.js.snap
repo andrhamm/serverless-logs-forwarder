@@ -1,0 +1,110 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`parse extractLogs returns parsed log objects 1`] = `
+Array [
+  Object {
+    "@timestamp": 2015-05-28T15:27:35.000Z,
+    "functionName": "my-stack-my_function",
+    "id": "1",
+    "lambdaVersion": "$LATEST",
+    "level": "info",
+    "logGroup": "/aws/lambda/my-stack-my_function",
+    "logStream": "2018/11/05/[$LATEST]a3a206b7b35f414f9f567242385ede8a",
+    "message": "message 1",
+    "request_id": 1,
+    "type": "cloudwatch",
+  },
+  Object {
+    "@timestamp": 2015-05-28T15:27:35.000Z,
+    "functionName": "my-stack-my_function",
+    "id": "2",
+    "lambdaVersion": "$LATEST",
+    "level": "info",
+    "logGroup": "/aws/lambda/my-stack-my_function",
+    "logStream": "2018/11/05/[$LATEST]a3a206b7b35f414f9f567242385ede8a",
+    "message": "message 2",
+    "request_id": 2,
+    "type": "cloudwatch",
+  },
+  Object {
+    "@timestamp": 2015-05-28T15:27:35.000Z,
+    "fields": Object {
+      "customField": "custom field value",
+    },
+    "functionName": "my-stack-my_function",
+    "id": "3",
+    "lambdaVersion": "$LATEST",
+    "level": "info",
+    "logGroup": "/aws/lambda/my-stack-my_function",
+    "logStream": "2018/11/05/[$LATEST]a3a206b7b35f414f9f567242385ede8b",
+    "message": null,
+    "request_id": 3,
+    "type": "cloudwatch",
+  },
+  Object {
+    "@timestamp": 2015-05-28T15:27:35.000Z,
+    "functionName": "my-stack-my_function",
+    "id": "4",
+    "lambdaVersion": "$LATEST",
+    "level": "info",
+    "logGroup": "/aws/lambda/my-stack-my_function",
+    "logStream": "2018/11/05/[$LATEST]a3a206b7b35f414f9f567242385ede8b",
+    "message": "message 4",
+    "request_id": 4,
+    "type": "cloudwatch",
+  },
+]
+`;
+
+exports[`parse extractRecords returns filtered and decoded records 1`] = `
+Array [
+  Object {
+    "logEvents": Array [
+      Object {
+        "extractedFields": Object {
+          "event": "message 1",
+          "request_id": 1,
+          "timestamp": 1432826855000,
+        },
+        "id": "1",
+      },
+      Object {
+        "extractedFields": Object {
+          "event": "message 2",
+          "request_id": 2,
+          "timestamp": 1432826855000,
+        },
+        "id": "2",
+      },
+    ],
+    "logGroup": "/aws/lambda/my-stack-my_function",
+    "logStream": "2018/11/05/[$LATEST]a3a206b7b35f414f9f567242385ede8a",
+    "messageType": "DATA_MESSAGE",
+  },
+  Object {
+    "logEvents": Array [
+      Object {
+        "extractedFields": Object {
+          "event": "{\\"customField\\":\\"custom field value\\"}",
+          "request_id": 3,
+          "timestamp": 1432826855000,
+        },
+        "id": "3",
+      },
+      Object {
+        "extractedFields": Object {
+          "event": "message 4",
+          "request_id": 4,
+          "timestamp": 1432826855000,
+        },
+        "id": "4",
+      },
+    ],
+    "logGroup": "/aws/lambda/my-stack-my_function",
+    "logStream": "2018/11/05/[$LATEST]a3a206b7b35f414f9f567242385ede8b",
+    "messageType": "DATA_MESSAGE",
+  },
+]
+`;
+
+exports[`parse parseFunctionName returns lambda name from log group name 1`] = `"my-stack-my_function"`;

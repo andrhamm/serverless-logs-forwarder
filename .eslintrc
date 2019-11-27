@@ -1,0 +1,35 @@
+{
+  "extends": ["airbnb", "plugin:jest/recommended"],
+  "env": {
+    "node": true,
+    "jest": true,
+    "jest/globals": true
+  },
+  "plugins": ["jest"],
+  "overrides": [
+    {
+      "files": "*",
+      "rules": {
+        "import/no-unresolved": [
+          "error",
+          {
+            "ignore": [
+              "aws-sdk"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "*.test.js"
+      ],
+      "rules": {
+        "func-names": [
+          "error",
+          "never"
+        ]
+      }
+    }
+  ]
+}

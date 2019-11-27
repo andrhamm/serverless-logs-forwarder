@@ -1,0 +1,512 @@
+service:
+  name: cloudwatch-logs-elk-forwarder
+  awsKmsKeyArn: ${file(./config.${self:provider.stage}.yaml):aws-kms-key-arn-secrets}
+
+plugins:
+  - serverless-iam-roles-per-function
+  # - serverless-plugin-tracing
+  - serverless-webpack
+
+custom:
+  aws_account_id: ${file(./config.${self:provider.stage}.yaml):aws-account-id}
+  webpack:
+    webpackConfig: ./webpack.config.js
+    includeModules:
+      forceExclude:
+        - aws-sdk
+        - aws-xray-sdk
+    packager: yarn
+  serverless-iam-roles-per-function:
+    defaultInherit: true
+  s3_bucket_name: ${self:service.name}-${self:provider.stage}
+  s3_bucket_arn: "arn:aws:s3:::${self:custom.s3_bucket_name}"
+  sns_topic_name: ${self:service.name}-loggroup-events-${self:provider.stage}
+
+provider:
+  name: aws
+  runtime: nodejs8.10
+  stage: ${opt:stage, 'dev'}
+  tracing: true
+  # profile: ${opt:profile, 'dev'}
+  region: us-east-1
+  versionFunctions: false
+  environment:
+    # NOTE: this is useful for local invocations and has no affect in deployed environments
+    # AWS_PROFILE: ${self:provider.profile}
+    LOG_GROUP_PREFIX: "/aws/lambda"
+  stackTags:
+    Business Unit: "Misc"
+    Team: "Eng/Core-Services"
+  vpc: ${file(./config.vpc.${self:provider.stage}.yaml)}
+  iamRoleStatements:
+    # These will be inherited by all functions. see custom.serverless-iam-roles-per-function.defaultInherit
+    - Effect: "Allow"
+      Action:
+        - "xray:PutTraceSegments"
+        - "xray:PutTelemetryRecords"
+      Resource:
+        - "*"
+
+package:
+  individually: true
+  exclude:
+    - config.*.yaml
+
+functions:
+  queue-event:
+    handler: functions/queue-event.handler
+    description: Queue events from Kinesis into SQS for observability
+    memorySize: 128
+    environment:
+      SNS_TOPIC_ARN_LOGGROUP_EVENTS:
+        Ref: LogGroupEventsSnsTopic
+    iamRoleStatements:
+      - Effect: "Allow"
+        Action:
+          - sns:Publish
+        Resource:
+          - Ref: LogGroupEventsSnsTopic
+    events:
+      - cloudwatchEvent:
+          description: 'CloudWatch Event triggered on CloudWatch Logs LogGroup creation'
+          name: ${self:service.name}-new-loggroup
+          event:
+            source:
+              - aws.logs
+            detail-type:
+              - AWS API Call via CloudTrail
+            detail:
+              eventSource:
+                - logs.amazonaws.com
+              eventName:
+                - CreateLogGroup
+
+  ship-logs: # Do not change function name! Risks infinite loop of log shipping! F$$$!
+    handler: functions/ship-logs.handler
+    description: Sends CloudWatch logs from Kinesis to ELK
+    memorySize: 128
+    timeout: 20
+    environment:
+      ELASTICSEARCH_HOST: ${file(./config.${self:provider.stage}.yaml):elasticsearch-host}
+      ELASTICSEARCH_HTTPAUTH_ENCRYPTED: ${file(./config.${self:provider.stage}.yaml):elasticsearch-httpauth}
+      S3_BUCKET_NAME:
+        Ref: S3BucketCloudWatchElkForwarder
+    iamRoleStatements:
+      - Effect: "Allow"
+        Action:
+          - s3:GetObject
+        Resource:
+          - ${self:custom.s3_bucket_arn}
+          - "${self:custom.s3_bucket_arn}/cloudwatch-cloudformation-mapping.json"
+    events:
+      - stream:
+          type: kinesis
+          batchSize: 100
+          arn:
+            Fn::GetAtt: [ LogsKinesisStream, Arn ]
+
+  set-retention:
+    handler: functions/set-retention.handler
+    description: Sets the log retention policy to the specified no. of days
+    memorySize: 128
+    environment:
+      RETENTION_DAYS: "7"
+    iamRoleStatements:
+      - Effect: "Allow"
+        Action:
+          - logs:PutRetentionPolicy
+          - logs:DescribeLogGroups
+        Resource: "*"
+      - Effect: Allow
+        Action:
+          - sqs:ReceiveMessage
+          - sqs:DeleteMessage
+          - sqs:GetQueueAttributes
+        Resource:
+          - Fn::GetAtt: [ SetRetentionSqsQueue, Arn ]
+    events:
+      - sqs:
+          batchSize: 1
+          enabled: true
+          arn:
+            Fn::GetAtt: [ SetRetentionSqsQueue, Arn ]
+
+  subscribe:
+    handler: functions/subscribe.handler
+    description: Subscribe logs to the Kinesis stream
+    memorySize: 128
+    environment:
+      KINESIS_DESTINATION_ARN:
+        Fn::GetAtt: [ LogsKinesisStream, Arn ]
+      ROLE_ARN:
+        Fn::GetAtt: [ CloudWatchLogsRole, Arn ]
+    iamRoleStatements:
+      - Effect: Allow
+        Action:
+          - sqs:ReceiveMessage
+          - sqs:DeleteMessage
+          - sqs:GetQueueAttributes
+        Resource:
+          - Fn::GetAtt: [ SubscribeSqsQueue, Arn ]
+      - Effect: "Allow"
+        Action:
+          - logs:PutSubscriptionFilter
+        Resource: "arn:aws:logs:${self:provider.region}:${self:custom.aws_account_id}:log-group:/aws/lambda/*:log-stream:"
+      - Effect: "Allow"
+        Action:
+          - iam:PassRole
+        Resource:
+          Fn::GetAtt: [ CloudWatchLogsRole, Arn ]
+    events:
+      - sqs:
+          batchSize: 1
+          enabled: true
+          arn:
+            Fn::GetAtt: [ SubscribeSqsQueue, Arn ]
+
+  save-mapping:
+    handler: functions/save-mapping.handler
+    description: Saves a mapping of all LogGroups to their CloudFormation Stacks, creates Kibana index patterns
+    memorySize: 256
+    timeout: 60
+    resrevedConcurrency: 1
+    environment:
+      S3_BUCKET_NAME:
+        Ref: S3BucketCloudWatchElkForwarder
+      STAGE: ${self:provider.stage}
+    iamRoleStatements:
+      - Effect: "Allow"
+        Action:
+          - s3:GetObject*
+          - s3:PutObject*
+        Resource:
+          - ${self:custom.s3_bucket_arn}
+          - "${self:custom.s3_bucket_arn}/*"
+      - Effect: "Allow"
+        Action:
+          - cloudformation:ListStacks
+          - cloudformation:ListStackResources
+        Resource: "*"
+      - Effect: Allow
+        Action:
+          - sqs:ReceiveMessage
+          - sqs:DeleteMessage
+          - sqs:GetQueueAttributes
+        Resource:
+          - Fn::GetAtt: [ SaveMappingSqsQueue, Arn ]
+    events:
+      - sqs:
+          batchSize: 1
+          enabled: true
+          arn:
+            Fn::GetAtt: [ SaveMappingSqsQueue, Arn ]
+
+  save-index-pattern:
+    handler: functions/save-index-pattern.handler
+    description: Saves a Kibana index pattern for the new LogGroup
+    memorySize: 128
+    environment:
+      KIBANA_API_BASE: ${file(./config.${self:provider.stage}.yaml):kibana-api-base}
+      STAGE: ${self:provider.stage}
+    iamRoleStatements:
+      - Effect: "Allow"
+        Action:
+          - cloudformation:ListStacks
+          - cloudformation:ListStackResources
+          - cloudformation:DescribeStackResources
+        Resource: "*"
+      - Effect: Allow
+        Action:
+          - sqs:ReceiveMessage
+          - sqs:DeleteMessage
+          - sqs:GetQueueAttributes
+        Resource:
+          - Fn::GetAtt: [ SaveIndexPatternSqsQueue, Arn ]
+    events:
+      - sqs:
+          batchSize: 1
+          enabled: true
+          arn:
+            Fn::GetAtt: [ SaveIndexPatternSqsQueue, Arn ]
+
+  invoke-for-all:
+    handler: functions/invoke-for-all.handler
+    description: Invokes the specified Lambda function once for each LogGroup in the saved mapping in S3
+    memorySize: 256
+    timeout: 60
+    resrevedConcurrency: 1
+    environment:
+      S3_BUCKET_NAME:
+        Ref: S3BucketCloudWatchElkForwarder
+      LAMBDA_FUNCTION_NAME_PREFIX: "${self:service.name}-${self:provider.stage}-"
+      STAGE: ${self:provider.stage}
+    iamRoleStatements:
+      - Effect: "Allow"
+        Action:
+          - s3:GetObject*
+        Resource:
+          - ${self:custom.s3_bucket_arn}
+          - "${self:custom.s3_bucket_arn}/*"
+      - Effect: "Allow"
+        Action:
+          - lambda:InvokeFunction
+        Resource:
+          - Fn::GetAtt: [ SubscribeLambdaFunction, Arn]
+          - Fn::GetAtt: [ SaveDashindexDashpatternLambdaFunction, Arn]
+          - Fn::GetAtt: [ SetDashretentionLambdaFunction, Arn]
+
+  test-function:
+    handler: functions/test-function.handler
+    description: Function to test new log group creation
+
+resources:
+  Resources:
+    LogGroupEventsSnsTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        DisplayName: LogGroup events from CloudWatch.
+        TopicName: ${self:custom.sns_topic_name}
+
+    # SetRetention
+    SetRetentionDLQSqsQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service.name}-loggroup-setretention-dlq-${self:provider.stage}
+        MessageRetentionPeriod: 1209600 # 14 days in seconds
+    SetRetentionSqsQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service.name}-loggroup-setretention-${self:provider.stage}
+        RedrivePolicy:
+          deadLetterTargetArn:
+            Fn::GetAtt: [ SetRetentionDLQSqsQueue, Arn ]
+          maxReceiveCount: 20
+    SetRetentionSqsPolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Sid: "allow-sns-messages"
+              Effect: Allow
+              Principal: "*"
+              Resource: !GetAtt
+                - SetRetentionSqsQueue
+                - Arn
+              Action: "SQS:SendMessage"
+              Condition:
+                ArnEquals:
+                  "aws:SourceArn": !Ref LogGroupEventsSnsTopic
+        Queues:
+          - Ref: SetRetentionSqsQueue
+    SetRetentionSnsSubscription:
+      Type: 'AWS::SNS::Subscription'
+      Properties:
+        TopicArn: !Ref LogGroupEventsSnsTopic
+        Endpoint: !GetAtt
+          - SetRetentionSqsQueue
+          - Arn
+        Protocol: sqs
+        RawMessageDelivery: 'true'
+
+    # Subscribe
+    SubscribeDLQSqsQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service.name}-loggroup-subscribe-dlq-${self:provider.stage}
+        MessageRetentionPeriod: 1209600 # 14 days in seconds
+    SubscribeSqsQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service.name}-loggroup-subscribe-${self:provider.stage}
+        # Delay allows log groups to be tagged in order to disable forwarding
+        # Since CloudFormation doesn't allow you to specify tags on LogGroup resources
+        # at the time of creation, you have to do a follow-up API call to add the tags
+        DelaySeconds: 300
+        RedrivePolicy:
+          deadLetterTargetArn:
+            Fn::GetAtt: [ SubscribeDLQSqsQueue, Arn ]
+          maxReceiveCount: 20
+    SubscribeSqsPolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Sid: "allow-sns-messages"
+              Effect: Allow
+              Principal: "*"
+              Resource: !GetAtt
+                - SubscribeSqsQueue
+                - Arn
+              Action: "SQS:SendMessage"
+              Condition:
+                ArnEquals:
+                  "aws:SourceArn": !Ref LogGroupEventsSnsTopic
+        Queues:
+          - Ref: SubscribeSqsQueue
+    SubscribeSnsSubscription:
+      Type: 'AWS::SNS::Subscription'
+      Properties:
+        TopicArn: !Ref LogGroupEventsSnsTopic
+        Endpoint: !GetAtt
+          - SubscribeSqsQueue
+          - Arn
+        Protocol: sqs
+        RawMessageDelivery: 'true'
+
+    # SaveMappingSqsQueue
+    SaveMappingDLQSqsQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service.name}-loggroup-savemapping-dlq-${self:provider.stage}
+        MessageRetentionPeriod: 1209600 # 14 days in seconds
+    SaveMappingSqsQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service.name}-loggroup-savemapping-${self:provider.stage}
+        VisibilityTimeout: ${self:functions.save-mapping.timeout}
+        RedrivePolicy:
+          deadLetterTargetArn:
+            Fn::GetAtt: [ SaveMappingDLQSqsQueue, Arn ]
+          maxReceiveCount: 20
+    SaveMappingSqsPolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Sid: "allow-sns-messages"
+              Effect: Allow
+              Principal: "*"
+              Resource: !GetAtt
+                - SaveMappingSqsQueue
+                - Arn
+              Action: "SQS:SendMessage"
+              Condition:
+                ArnEquals:
+                  "aws:SourceArn": !Ref LogGroupEventsSnsTopic
+        Queues:
+          - Ref: SaveMappingSqsQueue
+    SaveMappingSnsSubscription:
+      Type: 'AWS::SNS::Subscription'
+      Properties:
+        TopicArn: !Ref LogGroupEventsSnsTopic
+        Endpoint: !GetAtt
+          - SaveMappingSqsQueue
+          - Arn
+        Protocol: sqs
+        RawMessageDelivery: 'true'
+
+    # SaveIndexPatternSqsQueue
+    SaveIndexPatternDLQSqsQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service.name}-loggroup-saveindexpattern-dlq-${self:provider.stage}
+        MessageRetentionPeriod: 1209600 # 14 days in seconds
+    SaveIndexPatternSqsQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: ${self:service.name}-loggroup-saveindexpattern-${self:provider.stage}
+        RedrivePolicy:
+          deadLetterTargetArn:
+            Fn::GetAtt: [ SaveIndexPatternDLQSqsQueue, Arn ]
+          maxReceiveCount: 20
+    SaveIndexPatternSqsPolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Sid: "allow-sns-messages"
+              Effect: Allow
+              Principal: "*"
+              Resource: !GetAtt
+                - SaveIndexPatternSqsQueue
+                - Arn
+              Action: "SQS:SendMessage"
+              Condition:
+                ArnEquals:
+                  "aws:SourceArn": !Ref LogGroupEventsSnsTopic
+        Queues:
+          - Ref: SaveIndexPatternSqsQueue
+    SaveIndexPatternSnsSubscription:
+      Type: 'AWS::SNS::Subscription'
+      Properties:
+        TopicArn: !Ref LogGroupEventsSnsTopic
+        Endpoint: !GetAtt
+          - SaveIndexPatternSqsQueue
+          - Arn
+        Protocol: sqs
+        RawMessageDelivery: 'true'
+
+    # TODO: specify SQS DLQ for ship-logs lambda function, stop eating exceptions
+    LogsKinesisStream:
+      Type: AWS::Kinesis::Stream
+      Properties:
+        Name: ${self:service.name}-${self:provider.stage}-logs
+        ShardCount: 1
+    CloudWatchLogsRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - logs.amazonaws.com
+              Action:
+                - sts:AssumeRole
+        Policies:
+          - PolicyName: root
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - kinesis:PutRecords
+                    - kinesis:PutRecord
+                  Resource:
+                    Fn::GetAtt: [ LogsKinesisStream, Arn ]
+        RoleName: ${self:service.name}-${self:provider.stage}-cloudwatchrole
+    S3BucketCloudWatchElkForwarder:
+      Type: AWS::S3::Bucket
+      Properties:
+        BucketName: ${self:custom.s3_bucket_name}
+    SecretsKMSKey:
+      Type: AWS::KMS::Key
+      Properties:
+        Description: Key for secrets encryption/decryption
+        KeyPolicy:
+          Version: "2012-10-17"
+          Id: ${self:service.name}-secrets
+          Statement:
+            - Sid: Allow administration of the key
+              Effect: Allow
+              Principal:
+                AWS:
+                  - arn:aws:iam::${self:custom.aws_account_id}:user/ahammond
+                  - arn:aws:iam::${self:custom.aws_account_id}:user/craig
+              Action:
+                - "kms:*"
+              Resource: "*"
+            - Sid: Allow use of the key
+              Effect: Allow
+              Principal:
+                AWS:
+                  # Add SaveDashmappingIamRoleLambdaExecution if/when Kibana writes happen
+                  - Fn::GetAtt: [ ShipDashlogsIamRoleLambdaExecution, Arn ]
+              Action:
+                - "kms:Encrypt"
+                - "kms:Decrypt"
+                - "kms:ReEncrypt*"
+                - "kms:GenerateDataKey*"
+                - "kms:DescribeKey"
+              Resource: "*"
+    SecretsKMSKeyAlias:
+      Type: AWS::KMS::Alias
+      Properties:
+        AliasName: alias/${self:service.name}-secrets
+        TargetKeyId:
+          Ref: SecretsKMSKey

@@ -1,0 +1,49 @@
+{
+  "name": "serverless-logs-forwarder",
+  "version": "1.0.0",
+  "description": "A Serverless application for forwarding CloudWatch Logs to ELK",
+  "main": "handler.js",
+  "scripts": {
+    "preinstall": "node -e \"if(process.env.npm_execpath.indexOf('yarn') === -1) throw new Error('You must use Yarn to install, not NPM')\"",
+    "test": "jest"
+  },
+  "author": "Andrew Hammond",
+  "license": "none",
+  "dependencies": {
+    "aws-sdk": "^2.351.0",
+    "aws-xray-sdk": "^2.0.1",
+    "axios": "^0.18.0",
+    "elasticsearch": "^15.2.0",
+    "p-map": "^2.0.0",
+    "p-queue": "^3.0.0"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.1.0",
+    "babel-core": "^6.26.3",
+    "babel-eslint": "^8.2.3",
+    "babel-jest": "^23.6.0",
+    "babel-loader": "^7.1.4",
+    "babel-plugin-source-map-support": "^2.0.1",
+    "babel-plugin-transform-object-rest-spread": "^6.26.0",
+    "babel-preset-env": "^1.7.0",
+    "eslint": "^4.19.1",
+    "eslint-config-airbnb": "^18.0.1",
+    "eslint-plugin-jest": "^21.26.2",
+    "jest": "^23.6.0",
+    "serverless": "^1.38.0",
+    "serverless-iam-roles-per-function": "^1.0.4",
+    "serverless-plugin-tracing": "^2.0.0",
+    "serverless-webpack": "^5.2.0",
+    "sinon": "^7.1.0",
+    "webpack": "^4.23.1",
+    "webpack-node-externals": "^1.7.2"
+  },
+  "private": true,
+  "jest": {
+    "setupTestFrameworkScriptFile": "<rootDir>/__tests__/__helpers__/setup.js",
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/__tests__/__helpers__/"
+    ]
+  }
+}

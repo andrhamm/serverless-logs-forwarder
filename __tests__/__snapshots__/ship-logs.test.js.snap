@@ -1,0 +1,85 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`ship-logs handler calls elasticsearch bulk 1`] = `
+Array [
+  Object {
+    "body": Array [
+      Object {
+        "index": Object {
+          "_id": "1",
+          "_index": "cloudwatchlogs-stack-0-2018.11.06",
+          "_type": "cloudwatchlog",
+        },
+      },
+      Object {
+        "@timestamp": 2015-05-28T15:27:35.000Z,
+        "functionName": "my-stack-my_function",
+        "lambdaVersion": "$LATEST",
+        "level": "info",
+        "logGroup": "/aws/lambda/my-stack-my_function",
+        "logStream": "2018/11/05/[$LATEST]a3a206b7b35f414f9f567242385ede8a",
+        "message": "message 1",
+        "request_id": 1,
+        "type": "cloudwatch",
+      },
+      Object {
+        "index": Object {
+          "_id": "2",
+          "_index": "cloudwatchlogs-stack-0-2018.11.06",
+          "_type": "cloudwatchlog",
+        },
+      },
+      Object {
+        "@timestamp": 2015-05-28T15:27:35.000Z,
+        "functionName": "my-stack-my_function",
+        "lambdaVersion": "$LATEST",
+        "level": "info",
+        "logGroup": "/aws/lambda/my-stack-my_function",
+        "logStream": "2018/11/05/[$LATEST]a3a206b7b35f414f9f567242385ede8a",
+        "message": "message 2",
+        "request_id": 2,
+        "type": "cloudwatch",
+      },
+      Object {
+        "index": Object {
+          "_id": "3",
+          "_index": "cloudwatchlogs-stack-0-2018.11.06",
+          "_type": "cloudwatchlog",
+        },
+      },
+      Object {
+        "@timestamp": 2015-05-28T15:27:35.000Z,
+        "fields": Object {
+          "customField": "custom field value",
+        },
+        "functionName": "my-stack-my_function",
+        "lambdaVersion": "$LATEST",
+        "level": "info",
+        "logGroup": "/aws/lambda/my-stack-my_function",
+        "logStream": "2018/11/05/[$LATEST]a3a206b7b35f414f9f567242385ede8b",
+        "message": null,
+        "request_id": 3,
+        "type": "cloudwatch",
+      },
+      Object {
+        "index": Object {
+          "_id": "4",
+          "_index": "cloudwatchlogs-stack-0-2018.11.06",
+          "_type": "cloudwatchlog",
+        },
+      },
+      Object {
+        "@timestamp": 2015-05-28T15:27:35.000Z,
+        "functionName": "my-stack-my_function",
+        "lambdaVersion": "$LATEST",
+        "level": "info",
+        "logGroup": "/aws/lambda/my-stack-my_function",
+        "logStream": "2018/11/05/[$LATEST]a3a206b7b35f414f9f567242385ede8b",
+        "message": "message 4",
+        "request_id": 4,
+        "type": "cloudwatch",
+      },
+    ],
+  },
+]
+`;
