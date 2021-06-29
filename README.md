@@ -67,7 +67,7 @@ See [kinesis.describeStreamSummary()](https://docs.aws.amazon.com/AWSJavaScriptS
 
 ## Deployment
 
-Take care to use the correct AWS Credential "profile". By default, this service assumes you have the credentials set in `~/.aws/credentials` with the profile name equal to that environment's AWS Account Name (`gasbuddy-staging`). If your profiles are named differently, be sure to use the `--profile` argument.
+Take care to use the correct AWS Credential "profile". By default, this service assumes you have the credentials set in `~/.aws/credentials` with the profile name equal to that environment's AWS Account Name (`staging`). If your profiles are named differently, be sure to use the `--profile` argument.
 
 Note: Run these commands in the `serverless` directory
 
@@ -75,7 +75,7 @@ Note: Run these commands in the `serverless` directory
 
 Specify profile override
 
-    serverless deploy --stage stage --profile gasbuddy-staging
+    serverless deploy --stage stage --profile staging
 
 ## Logs
 
